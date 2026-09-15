@@ -22,7 +22,7 @@ A self-hosted, browser-based Git client with a built-in terminal. Run it on your
 ## Setup
 
 ```bash
-git clone https://github.com/your-username/groove.git
+git clone https://github.com/cy-rus404/groove.git
 cd groove
 npm install
 npm start
