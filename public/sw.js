@@ -1,4 +1,4 @@
-const CACHE = 'groove-v2';
+const CACHE = 'groove-v6';
 const SHELL = [
   '/',
   '/manifest.json',
