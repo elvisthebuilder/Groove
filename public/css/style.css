@@ -1211,116 +1211,53 @@ html {
   padding: 0;
   font-size: 13.5px;
   line-height: 1.65;
-  color: #e6edf3;
   display: block;
   font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
 }
 
-/* ── Markdown Codeblock Header & Collapse ──────────────── */
+/* ── Markdown Codeblock + Corner Toggle ─────────────────── */
 .md-codeblock-wrapper {
-  margin: 1.4em 0;
-  border-radius: 8px;
-  border: 1px solid #30363d;
-  background: #161b22;
-  overflow: hidden;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-  transition: border-color 0.2s;
+  position: relative;
+  margin: 1.2em 0;
 }
-.md-codeblock-wrapper:hover {
-  border-color: #484f58;
-}
+
 .md-codeblock-wrapper pre {
-  border: none !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  background: transparent !important;
+  margin: 0 !important;
 }
 
-.md-codeblock-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px;
-  background: #0d1117;
-  border-bottom: 1px solid #21262d;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  user-select: none;
-}
-
-.md-cb-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  color: var(--muted2);
-  transition: color 0.15s;
-}
-.md-cb-header-left:hover {
-  color: var(--text);
-}
-
-.md-cb-collapse-arrow {
-  font-size: 10px;
-  color: var(--muted);
-  width: 12px;
-  display: inline-block;
-  text-align: center;
-}
-
-.md-cb-lang-badge {
-  font-weight: 600;
-  text-transform: uppercase;
-  font-size: 10px;
-  color: #79c0ff;
-  letter-spacing: 0.5px;
-}
-
-.md-cb-hint {
-  font-size: 10.5px;
-  color: var(--muted);
-  font-style: italic;
-}
-
-.md-cb-header-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.md-cb-copy-btn,
-.md-cb-toggle-btn {
-  background: #1f242c;
-  border: 1px solid #30363d;
-  color: var(--muted2);
+/* Small arrow button floating top-right of each code block */
+.md-cb-corner-arrow {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
   border-radius: 4px;
-  padding: 3px 8px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  cursor: pointer;
+  color: var(--muted2);
+  width: 22px;
+  height: 22px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  transition: all 0.15s;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  padding: 0;
+  line-height: 1;
+  z-index: 2;
 }
-.md-cb-copy-btn:hover,
-.md-cb-toggle-btn:hover {
-  background: #30363d;
+.md-codeblock-wrapper:hover .md-cb-corner-arrow {
+  opacity: 1;
+}
+.md-cb-corner-arrow:hover {
+  background: rgba(255,255,255,0.12);
   color: var(--text);
-  border-color: #58a6ff;
-}
-.md-cb-copy-btn.copied {
-  color: var(--green);
-  border-color: var(--green);
-  background: rgba(63, 185, 80, 0.15);
 }
 
 .md-codeblock-wrapper.is-collapsed pre {
   display: none !important;
 }
-.md-codeblock-wrapper.is-collapsed .md-codeblock-header {
-  border-bottom: none;
-}
+
 
 /* ── Codeblocks Dropdown in Toolbar ────────────────────── */
 .dropdown-wrapper {
@@ -1917,3 +1854,62 @@ html {
   }
 }
 
+
+/* Editor Tabs */
+.editor-tabs-bar {
+  display: flex;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  user-select: none;
+  flex-shrink: 0;
+}
+.editor-tabs-bar::-webkit-scrollbar { height: 2px; }
+.editor-tabs-bar::-webkit-scrollbar-thumb { background: var(--border); }
+.editor-tab {
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--muted);
+  border-right: 1px solid var(--border);
+  border-top: 2px solid transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg2);
+  white-space: nowrap;
+}
+.editor-tab:hover {
+  background: var(--bg-hover);
+}
+.editor-tab.active {
+  background: var(--bg);
+  color: var(--fg);
+  border-top: 2px solid var(--green);
+  border-bottom: 1px solid var(--bg);
+  margin-bottom: -1px;
+}
+.editor-tab.dirty::before {
+  content: "•";
+  color: var(--yellow);
+  font-size: 16px;
+  line-height: 0;
+  margin-right: -4px;
+}
+.editor-tab-close {
+  opacity: 0;
+  font-size: 14px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+.editor-tab:hover .editor-tab-close, .editor-tab.active .editor-tab-close {
+  opacity: 0.5;
+}
+.editor-tab-close:hover {
+  opacity: 1 !important;
+  background: var(--border);
+}

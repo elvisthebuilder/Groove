@@ -1,5 +1,86 @@
 
 // ─── State ───────────────────────────────────────────────
+
+let editorTabs = [];
+function saveEditorTabs() {
+  if (REPO) {
+    localStorage.setItem('groove_editor_tabs_' + REPO, JSON.stringify(editorTabs));
+  }
+}
+
+function renderEditorTabs() {
+  const bar = $('editorTabsBar');
+  if (!bar) return;
+  if (editorTabs.length === 0) {
+    bar.style.display = 'none';
+    return;
+  }
+  bar.style.display = 'flex';
+  bar.innerHTML = editorTabs.map(f => {
+    const name = f.split('/').pop();
+    const isActive = f === activeFile;
+    const isDirty = localStorage.getItem(`groove_draft_${REPO}_${f}`) ? 'dirty' : '';
+    const div = document.createElement('div');
+    div.textContent = name;
+    const safeName = div.innerHTML;
+    return `
+      <div class="editor-tab ${isActive ? 'active' : ''} ${isDirty}" onclick="switchEditorTab('${esc(f)}')">
+        <span>${safeName}</span>
+        <span class="editor-tab-close" onclick="event.stopPropagation(); closeEditorTab('${esc(f)}')">✕</span>
+      </div>
+    `;
+  }).join('');
+}
+
+function switchEditorTab(file) {
+  if (activeFile === file) return;
+  openEditor(file);
+}
+
+function closeEditorTab(file) {
+  const idx = editorTabs.indexOf(file);
+  if (idx === -1) return;
+  
+  if (file === activeFile && editorDirty) {
+    if (!confirm('You have unsaved changes in this tab. Discard them?')) return;
+    localStorage.removeItem(`groove_draft_${REPO}_${file}`);
+  } else if (localStorage.getItem(`groove_draft_${REPO}_${file}`)) {
+    if (!confirm(`Discard unsaved changes in ${file}?`)) return;
+    localStorage.removeItem(`groove_draft_${REPO}_${file}`);
+  }
+  
+  editorTabs.splice(idx, 1);
+  saveEditorTabs();
+  
+  if (activeFile === file) {
+    if (editorTabs.length > 0) {
+      const nextFile = editorTabs[Math.min(idx, editorTabs.length - 1)];
+      openEditor(nextFile);
+    } else {
+      activeFile = null;
+      localStorage.removeItem('groove_active_file');
+      if (typeof cmEditor !== 'undefined') cmEditor.setValue('');
+      if ($('editorPanel')) $('editorPanel').classList.remove('open');
+      if ($('editorEmpty')) $('editorEmpty').style.display = 'flex';
+      renderEditorTabs();
+    }
+  } else {
+    renderEditorTabs();
+  }
+}
+
+function allowDrop(e) { e.preventDefault(); }
+function dropFileToTabs(e) {
+  e.preventDefault();
+  const file = e.dataTransfer.getData('text/plain');
+  if (file) openEditor(file);
+}
+
+function dragFile(e, file) {
+  e.dataTransfer.setData('text/plain', file);
+}
+
+
 let REPO = '';
 let activeFile = null;
 let editorDirty = false;
@@ -263,6 +344,10 @@ function showConnect() {
 async function connectRepo() {
   const p = $('repoPathInput').value.trim();
   if (!p) return;
+
+  const prevRepo = localStorage.getItem('groove_repo');
+  const isSwitchingProject = prevRepo && prevRepo !== p;
+
   REPO = p;
   localStorage.setItem('groove_repo', p);
   $('connectScreen').style.display = 'none';
@@ -277,28 +362,50 @@ async function connectRepo() {
     $('settingRepoPath').title = p;
   }
   $('termPanel').classList.add('hidden');
-  // ── Reset cached file list so stale files from a previous project never show ──
+
   allTreeFiles = [];
-  // Close any open editor/diff from a previous project
-  activeFile = null;
-  localStorage.removeItem('groove_active_file');
-  if ($('editorPanel')) $('editorPanel').classList.remove('open');
-  if ($('editorEmpty')) $('editorEmpty').style.display = 'flex';
-  if ($('editorToolbar')) { $('editorToolbar').classList.add('hidden'); $('editorToolbar').style.display = 'none'; }
-  if ($('editorCM')) $('editorCM').style.display = 'none';
-  if ($('editorImagePreview')) $('editorImagePreview').style.display = 'none';
-  if ($('editorMdPreview')) $('editorMdPreview').style.display = 'none';
-  if ($('editorMdCodeblocksDropdown')) $('editorMdCodeblocksDropdown').style.display = 'none';
+
+  // Restore editor tabs for this repo
+  try {
+    const tabs = JSON.parse(localStorage.getItem('groove_editor_tabs_' + REPO) || '[]');
+    editorTabs = Array.isArray(tabs) ? tabs : [];
+  } catch (e) {
+    editorTabs = [];
+  }
+
+  // Restore active file
+  let fileToRestore = isSwitchingProject ? null : localStorage.getItem('groove_active_file');
+  if (!fileToRestore && editorTabs.length > 0) {
+    fileToRestore = editorTabs[editorTabs.length - 1];
+  }
+  activeFile = fileToRestore || null;
+
+  if (isSwitchingProject) {
+    localStorage.removeItem('groove_active_file');
+  }
+
+  const hasFile = !!fileToRestore || editorTabs.length > 0;
+  if ($('editorPanel')) {
+    if (!hasFile) $('editorPanel').classList.remove('open');
+  }
+  if (!hasFile) {
+    if ($('editorEmpty')) $('editorEmpty').style.display = 'flex';
+    if ($('editorToolbar')) { $('editorToolbar').classList.add('hidden'); $('editorToolbar').style.display = 'none'; }
+    if ($('editorCM')) $('editorCM').style.display = 'none';
+    if ($('editorImagePreview')) $('editorImagePreview').style.display = 'none';
+    if ($('editorMdPreview')) $('editorMdPreview').style.display = 'none';
+  }
 
   initMobile();
   const savedTab = localStorage.getItem('groove_active_tab') || 'all';
   switchTab(savedTab);
   await Promise.all([loadRepoInfo(), loadStatus()]);
 
-  // Restore previously opened file if available
-  const savedFile = localStorage.getItem('groove_active_file');
-  if (savedFile) {
-    openEditor(savedFile);
+  renderEditorTabs();
+
+  // Restore previously opened file
+  if (fileToRestore) {
+    openEditor(fileToRestore);
   }
 
   // Restore mobile tab if on mobile
@@ -307,10 +414,12 @@ async function connectRepo() {
     mobileTab(savedMobileTab);
   }
 
-  // Reconnect terminal to new repo directory
-  if (typeof termSessions !== 'undefined') {
+  // If switching projects, close previous terminal sessions
+  if (isSwitchingProject && typeof termSessions !== 'undefined') {
     [...termSessions].forEach(s => closeTerm(s.id));
   }
+
+  // Restore terminal panel if it was open
   if (!isMobile()) {
     const termOpen = localStorage.getItem('groove_term_open') === '1';
     toggleTerm(termOpen);
@@ -656,16 +765,6 @@ function selectFile(el) {
   const file = el.dataset.file;
   if (!file) return;
 
-  // Toggle close if already active
-  if (activeFile === file) {
-    if (currentTab === 'changes') {
-      closeDiff();
-    } else {
-      closeEditor();
-    }
-    return;
-  }
-
   // Update active highlight
   document.querySelectorAll('.file-entry').forEach(e => e.classList.remove('active'));
   el.classList.add('active');
@@ -682,28 +781,34 @@ function selectFile(el) {
     }
     if (isMobile()) mobileTab('diff');
   } else {
-    // All files tab: open editor only
+    // All files tab: open editor
     openEditor(file);
   }
 }
 
 // ─── Markdown Parser Configuration ───────────────────────
 if (typeof marked !== 'undefined') {
-  marked.setOptions({
-    highlight: function(code, lang) {
-      if (typeof hljs !== 'undefined') {
-        const validLanguage = lang && hljs.getLanguage(lang) ? lang : 'plaintext';
-        try {
-          return hljs.highlight(code, { language: validLanguage }).value;
-        } catch (err) {
-          return hljs.highlightAuto(code).value;
-        }
-      }
-      return code;
-    },
-    breaks: true,
-    gfm: true
-  });
+  // marked v9+ dropped the `highlight` option — use the Renderer instead
+  const renderer = new marked.Renderer();
+  const origCode = renderer.code.bind(renderer);
+  renderer.code = function(token) {
+    // token is an object with .text, .lang in marked v9+
+    const code = token && typeof token === 'object' ? token.text : token;
+    const lang = token && typeof token === 'object' ? (token.lang || '') : (arguments[1] || '');
+    if (typeof hljs !== 'undefined') {
+      const validLang = lang && hljs.getLanguage(lang) ? lang : 'plaintext';
+      try {
+        const highlighted = hljs.highlight(code, { language: validLang }).value;
+        const escapedLang = lang ? lang.replace(/"/g, '&quot;') : '';
+        return `<pre><code class="hljs language-${escapedLang}">${highlighted}</code></pre>`;
+      } catch (e) {}
+    }
+    // fallback
+    const escaped = code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `<pre><code class="hljs">${escaped}</code></pre>`;
+  };
+  marked.setOptions({ breaks: true, gfm: true });
+  marked.use({ renderer });
 }
 
 // ─── Editor (CodeMirror) ─────────────────────────────────
@@ -765,6 +870,7 @@ function setEditorCleanState(showSavedIndicator = false) {
 }
 
 function setEditorDirtyState() {
+  if (typeof renderEditorTabs === "function") renderEditorTabs();
   editorDirty = true;
   clearTimeout(statusTimer);
   const saveBtn = $('editorSaveBtn');
@@ -948,28 +1054,12 @@ function enhanceMarkdownCodeblocks(container) {
   const fencedPres = [...container.querySelectorAll('pre')].filter(
     pre => pre.querySelector('code') !== null
   );
-  const dropdown = $('editorMdCodeblocksDropdown');
-
-  // Only show the dropdown button when there are 2+ code blocks
-  if (fencedPres.length < 2) {
-    if (dropdown) dropdown.style.display = 'none';
-  } else if (mdPreviewMode && dropdown) {
-    dropdown.style.display = 'inline-flex';
-  }
 
   const collapsedSet = getCollapsedCodeblocks();
 
   fencedPres.forEach((pre, idx) => {
     if (pre.parentElement && pre.parentElement.classList.contains('md-codeblock-wrapper')) {
       return;
-    }
-
-    const codeEl = pre.querySelector('code');
-    let lang = 'code';
-    if (codeEl) {
-      const cls = codeEl.className || '';
-      const match = cls.match(/language-([a-zA-Z0-9_-]+)/);
-      if (match) lang = match[1];
     }
 
     const cbId = `cb-${idx}`;
@@ -979,30 +1069,30 @@ function enhanceMarkdownCodeblocks(container) {
     wrapper.className = 'md-codeblock-wrapper' + (isCollapsed ? ' is-collapsed' : '');
     wrapper.dataset.cbId = cbId;
 
-    const header = document.createElement('div');
-    header.className = 'md-codeblock-header';
-    header.innerHTML = `
-      <div class="md-cb-header-left" onclick="toggleCodeblockCollapse('${cbId}', event)" title="Click to ${isCollapsed ? 'expand' : 'collapse'}">
-        <span class="md-cb-collapse-arrow">${isCollapsed ? '▶' : '▼'}</span>
-        <span class="md-cb-lang-badge">${esc(lang)}</span>
-        <span class="md-cb-hint">${isCollapsed ? '(collapsed — click to expand)' : ''}</span>
-      </div>
-      <div class="md-cb-header-right">
-        <button class="md-cb-copy-btn" onclick="copyCodeblock(this, event)" title="Copy code">
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          <span>copy</span>
-        </button>
-        <button class="md-cb-toggle-btn" onclick="toggleCodeblockCollapse('${cbId}', event)" title="${isCollapsed ? 'Expand code block' : 'Collapse code block'}">
-          <span>${isCollapsed ? 'expand' : 'collapse'}</span>
-        </button>
-      </div>
-    `;
-
     pre.parentNode.insertBefore(wrapper, pre);
-    wrapper.appendChild(header);
     wrapper.appendChild(pre);
+
+    // Only show the collapse arrow if the block is tall enough to need it
+    // We measure after insertion so the browser has laid it out
+    requestAnimationFrame(() => {
+      const MIN_HEIGHT = 180; // px — shorter blocks don't need collapsing
+      if (pre.scrollHeight > MIN_HEIGHT) {
+        const arrow = document.createElement('button');
+        arrow.className = 'md-cb-corner-arrow';
+        arrow.title = isCollapsed ? 'Expand' : 'Collapse';
+        arrow.innerHTML = isCollapsed
+          ? `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>`
+          : `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>`;
+        arrow.onclick = (e) => {
+          e.stopPropagation();
+          toggleCodeblockCollapse(cbId, e);
+        };
+        wrapper.appendChild(arrow);
+      }
+    });
   });
 }
+
 
 function copyCodeblock(btn, event) {
   if (event) event.stopPropagation();
@@ -1030,17 +1120,13 @@ function toggleCodeblockCollapse(cbId, event) {
   const isNowCollapsed = !wrapper.classList.contains('is-collapsed');
   wrapper.classList.toggle('is-collapsed', isNowCollapsed);
 
-  const arrow = wrapper.querySelector('.md-cb-collapse-arrow');
-  if (arrow) arrow.textContent = isNowCollapsed ? '▶' : '▼';
-
-  const hint = wrapper.querySelector('.md-cb-hint');
-  if (hint) hint.textContent = isNowCollapsed ? '(collapsed — click to expand)' : '';
-
-  const toggleBtnSpan = wrapper.querySelector('.md-cb-toggle-btn span');
-  if (toggleBtnSpan) toggleBtnSpan.textContent = isNowCollapsed ? 'expand' : 'collapse';
-
-  const toggleBtn = wrapper.querySelector('.md-cb-toggle-btn');
-  if (toggleBtn) toggleBtn.title = isNowCollapsed ? 'Expand code block' : 'Collapse code block';
+  const btn = wrapper.querySelector('.md-cb-corner-arrow');
+  if (btn) {
+    btn.title = isNowCollapsed ? 'Expand' : 'Collapse';
+    btn.innerHTML = isNowCollapsed
+      ? `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>`
+      : `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>`;
+  }
 
   const collapsedSet = getCollapsedCodeblocks();
   if (isNowCollapsed) {
@@ -1135,6 +1221,11 @@ async function openEditor(file) {
   panel.style.width = '';
   panel.style.flex = '';
   activeFile = file;
+  if (!editorTabs.includes(file)) {
+    editorTabs.push(file);
+    saveEditorTabs();
+  }
+  if (typeof renderEditorTabs === 'function') renderEditorTabs();
   try {
     localStorage.setItem('groove_active_file', file);
   } catch (e) {}
@@ -1203,78 +1294,122 @@ async function openEditor(file) {
   CodeMirror.autoLoadMode(cmEditor, mode);
   cmEditor.setOption('mode', mode);
 
+  const cacheKey = `groove_file_${REPO}_${file}`;
+  const draftKey = `groove_draft_${REPO}_${file}`;
+
+  // ── Step 1: Show cached content immediately so editor feels instant ──
+  const cachedContent = localStorage.getItem(cacheKey);
+  const savedDraft = localStorage.getItem(draftKey);
+
+  if (cachedContent !== null) {
+    const displayContent = (savedDraft !== null && savedDraft !== cachedContent && savedDraft !== '') ? savedDraft : cachedContent;
+    cmEditor.setValue(displayContent);
+    cmEditor.clearHistory();
+    cleanGeneration = cmEditor.changeGeneration();
+
+    if (savedDraft !== null && savedDraft !== cachedContent && savedDraft !== '') {
+      setEditorDirtyState();
+    } else {
+      setEditorCleanState(false);
+    }
+
+    // Restore markdown preview state
+    const savedMdPref = localStorage.getItem('groove_md_preview') === '1';
+    if (isMarkdown && savedMdPref) {
+      mdPreviewMode = true;
+      if (mdBtn) { mdBtn.classList.add('active'); mdBtn.title = 'Switch to raw markdown editor'; }
+      if ($('editorCM')) $('editorCM').style.display = 'none';
+      const preview = $('editorMdPreview');
+      if (preview) { preview.style.display = 'flex'; renderMarkdownPreview(cmEditor.getValue()); }
+    } else {
+      mdPreviewMode = false;
+      if (mdBtn) { mdBtn.classList.remove('active'); mdBtn.title = 'Toggle markdown preview'; }
+      if ($('editorMdPreview')) $('editorMdPreview').style.display = 'none';
+      if ($('editorCM')) $('editorCM').style.display = 'block';
+    }
+    if (isMobile()) mobileTab('editor');
+    setTimeout(() => cmEditor.refresh(), 50);
+  }
+
+  // ── Step 2: Fetch fresh content in the background ──
   try {
     const res = await fetch(`/api/file-read?repoPath=${encodeURIComponent(REPO)}&file=${encodeURIComponent(file)}`);
     const d = await res.json();
     if (d.error) throw new Error(d.error);
 
     const serverContent = d.content;
-    const savedDraft = localStorage.getItem(`groove_draft_${REPO}_${file}`);
 
-    cmEditor.setValue(serverContent);
-    cmEditor.clearHistory();
-    cleanGeneration = cmEditor.changeGeneration();
+    // Update cache
+    localStorage.setItem(cacheKey, serverContent);
 
-    const isPhantomDraft = savedDraft === "" && serverContent !== "";
-    
-    if (savedDraft !== null && savedDraft !== serverContent && !isPhantomDraft) {
-      cmEditor.setValue(savedDraft);
-      setEditorDirtyState();
-    } else {
-      if (isPhantomDraft) {
-        localStorage.removeItem(`groove_draft_${REPO}_${file}`);
+    // Only update the editor if there's no unsaved draft AND content actually changed
+    if (!editorDirty && serverContent !== cachedContent) {
+      const isPhantomDraft = savedDraft === '' && serverContent !== '';
+      if (savedDraft !== null && savedDraft !== serverContent && !isPhantomDraft) {
+        cmEditor.setValue(savedDraft);
+        setEditorDirtyState();
+      } else {
+        if (isPhantomDraft) localStorage.removeItem(draftKey);
+        cmEditor.setValue(serverContent);
+        cmEditor.clearHistory();
+        cleanGeneration = cmEditor.changeGeneration();
+        setEditorCleanState(false);
+        // Re-render markdown if in preview mode
+        if (isMarkdown && mdPreviewMode) {
+          renderMarkdownPreview(serverContent);
+        }
       }
-      setEditorCleanState(false);
+    } else if (cachedContent === null) {
+      // First time loading this file — no cache was available
+      const isPhantomDraft = savedDraft === '' && serverContent !== '';
+      if (savedDraft !== null && savedDraft !== serverContent && !isPhantomDraft) {
+        cmEditor.setValue(savedDraft);
+        setEditorDirtyState();
+      } else {
+        if (isPhantomDraft) localStorage.removeItem(draftKey);
+        cmEditor.setValue(serverContent);
+        cmEditor.clearHistory();
+        cleanGeneration = cmEditor.changeGeneration();
+        setEditorCleanState(false);
+      }
+
+      const savedMdPref = localStorage.getItem('groove_md_preview') === '1';
+      if (isMarkdown && savedMdPref) {
+        mdPreviewMode = true;
+        if (mdBtn) { mdBtn.classList.add('active'); mdBtn.title = 'Switch to raw markdown editor'; }
+        if ($('editorCM')) $('editorCM').style.display = 'none';
+        const preview = $('editorMdPreview');
+        if (preview) { preview.style.display = 'flex'; renderMarkdownPreview(cmEditor.getValue()); }
+      } else {
+        mdPreviewMode = false;
+        if (mdBtn) { mdBtn.classList.remove('active'); mdBtn.title = 'Toggle markdown preview'; }
+        if ($('editorMdPreview')) $('editorMdPreview').style.display = 'none';
+        if ($('editorCM')) $('editorCM').style.display = 'block';
+      }
+      if (isMobile()) mobileTab('editor');
+      setTimeout(() => cmEditor.refresh(), 50);
     }
-
-    // Markdown preview restoration if markdown file
-    const savedMdPref = localStorage.getItem('groove_md_preview') === '1';
-    if (isMarkdown && savedMdPref) {
-      mdPreviewMode = true;
-      if (mdBtn) {
-        mdBtn.classList.add('active');
-        mdBtn.title = 'Switch to raw markdown editor';
-      }
-      if ($('editorCM')) $('editorCM').style.display = 'none';
-      const preview = $('editorMdPreview');
-      if (preview) {
-        preview.style.display = 'flex';
-        const raw = cmEditor.getValue();
-        renderMarkdownPreview(raw);
-      }
-    } else {
-      mdPreviewMode = false;
-      if (mdBtn) {
-        mdBtn.classList.remove('active');
-        mdBtn.title = 'Toggle markdown preview';
-      }
-      if ($('editorMdPreview')) $('editorMdPreview').style.display = 'none';
-      if ($('editorMdCodeblocksDropdown')) $('editorMdCodeblocksDropdown').style.display = 'none';
-      if ($('editorCM')) $('editorCM').style.display = 'block';
-    }
-
-    // On mobile, switch to editor tab
-    if (isMobile()) mobileTab('editor');
-    // Refresh editor layout after panel opens
-    setTimeout(() => cmEditor.refresh(), 50);
   } catch (e) {
-    cmEditor.setValue(`# error loading file\n# ${e.message}`);
-    $('editorStatus').textContent = 'error';
-    $('editorStatus').className = 'editor-status error';
-    $('editorStatus').style.display = 'inline-block';
-    if ($('editorSaveBtn')) $('editorSaveBtn').style.display = 'none';
+    if (cachedContent === null) {
+      cmEditor.setValue(`# error loading file\n# ${e.message}`);
+      $('editorStatus').textContent = 'error';
+      $('editorStatus').className = 'editor-status error';
+      $('editorStatus').style.display = 'inline-block';
+      if ($('editorSaveBtn')) $('editorSaveBtn').style.display = 'none';
+    }
+    // If cache was available, silently keep showing cached content
   }
 }
 
 function closeEditor(force) {
-  if (!force && editorDirty && !confirm('You have unsaved changes. Close anyway?')) return;
+  if (activeFile) {
+    closeEditorTab(activeFile);
+    return;
+  }
   const panel = $('editorPanel');
   panel.classList.remove('open');
   panel.style.width = '';
   panel.style.flex = '';
-  if (activeFile && REPO) {
-    localStorage.removeItem(`groove_draft_${REPO}_${activeFile}`);
-  }
   localStorage.removeItem('groove_active_file');
   activeFile = null;
   setEditorCleanState(false);
@@ -1466,7 +1601,7 @@ function renderTree(files) {
       if (child === null) {
         // file
         html += `
-          <div class="file-entry tree-file${activeFile === fullPath ? ' active' : ''}" data-file="${esc(fullPath)}" onclick="selectFile(this)" style="padding-left:${12 + depth * 14}px">
+          <div class="file-entry tree-file${activeFile === fullPath ? ' active' : ''}" data-file="${esc(fullPath)}" draggable="true" ondragstart="dragFile(event, '${esc(fullPath)}')" onclick="selectFile(this)" style="padding-left:${12 + depth * 14}px">
             ${getFileIcon(name)}
             <span class="file-entry-name" title="${esc(fullPath)}">${esc(name)}</span>
             <span class="file-edit-hint">edit</span>
@@ -1738,10 +1873,19 @@ function switchTerm(id) {
   updateTermUI();
 }
 
-function addTerm() {
+function saveTermSessions() {
+  if (REPO) {
+    const sessionIds = termSessions.map(s => s.sessionId);
+    localStorage.setItem('groove_term_sessions_' + REPO, JSON.stringify(sessionIds));
+  }
+}
+
+function addTerm(existingSessionId = null) {
   const id = ++termCounter;
-  const session = { id, ready: false, processRunning: false, term: null, socket: null, fitAddon: null, container: null };
+  const sessionId = existingSessionId || 'term_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  const session = { id, sessionId, ready: false, processRunning: false, term: null, socket: null, fitAddon: null, container: null };
   termSessions.push(session);
+  saveTermSessions();
   
   const container = document.createElement('div');
   container.className = 'term-instance';
@@ -1779,13 +1923,17 @@ function addTerm() {
     });
     
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${location.host}/terminal?repoPath=${encodeURIComponent(REPO || '')}`;
+    const url = `${proto}://${location.host}/terminal?repoPath=${encodeURIComponent(REPO || '')}&sessionId=${sessionId}`;
     const ws = new WebSocket(url);
     session.socket = ws;
     
     ws.onopen = () => {
       fit.fit();
-      t.write('\r\n\x1b[32m# groove terminal\x1b[0m\r\n');
+      if (!existingSessionId) {
+        t.write('\r\n\x1b[32m# groove terminal\x1b[0m\r\n');
+      } else {
+        t.write('\r\n\x1b[34m# groove terminal (restored)\x1b[0m\r\n');
+      }
       session.ready = true;
       updateTermUI();
     };
@@ -1827,8 +1975,9 @@ function closeTerm(id) {
   if (idx === -1) return;
   const session = termSessions[idx];
   
-  if (session.socket) {
-    session.socket.onclose = null; // prevent disconnected message
+  if (session.socket && session.socket.readyState === WebSocket.OPEN) {
+    session.socket.send(JSON.stringify({ type: 'close' }));
+    session.socket.onclose = null;
     session.socket.close();
   }
   if (session.term) session.term.dispose();
@@ -1837,6 +1986,7 @@ function closeTerm(id) {
   }
   
   termSessions.splice(idx, 1);
+  saveTermSessions();
   
   if (termSessions.length === 0) {
     // No more tabs, close the panel
@@ -1852,6 +2002,15 @@ function closeTerm(id) {
 
 function initTerm() {
   if (termSessions.length === 0) {
+    if (REPO) {
+      try {
+        const saved = JSON.parse(localStorage.getItem('groove_term_sessions_' + REPO) || '[]');
+        if (saved.length > 0) {
+          saved.forEach(sid => addTerm(sid));
+          return;
+        }
+      } catch(e) {}
+    }
     addTerm();
   }
 }

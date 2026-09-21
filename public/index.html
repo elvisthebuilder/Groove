@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/tomorrow-night-eighties.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
-<link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/style.css?v=5">
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/mode/loadmode.min.js"></script>
@@ -165,26 +165,10 @@
 
       <!-- Right: code editor (opens on file click) -->
       <div id="editorPanel">
+        <div class="editor-tabs-bar" id="editorTabsBar" ondrop="dropFileToTabs(event)" ondragover="allowDrop(event)" style="display:none;"></div>
         <div class="editor-toolbar hidden" id="editorToolbar">
           <span class="editor-file-label" id="editorFilename">—</span>
           <span class="editor-status" id="editorStatus" style="display:none;"></span>
-          <div class="dropdown-wrapper" id="editorMdCodeblocksDropdown" style="display:none;">
-            <button class="editor-btn md-cb-dropdown-btn" id="editorMdCodeblocksBtn" onclick="toggleCodeblocksDropdown(event)" title="Code blocks options">
-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-              <span>codeblocks</span>
-              <span class="dropdown-arrow">▾</span>
-            </button>
-            <div class="dropdown-menu" id="editorMdCodeblocksMenu" style="display:none;">
-              <button class="dropdown-item" onclick="setAllCodeblocksCollapsed(false)">
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
-                Expand all
-              </button>
-              <button class="dropdown-item" onclick="setAllCodeblocksCollapsed(true)">
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"/></svg>
-                Collapse all
-              </button>
-            </div>
-          </div>
           <button class="editor-btn icon-btn" id="editorMdToggleBtn" onclick="toggleMdPreview()" title="Toggle Markdown preview" aria-label="Toggle Markdown preview" style="display:none;">
             <svg class="eye-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
           </button>
@@ -321,7 +305,7 @@
 
 <div id="toast"></div>
 
-<script src="/js/app.js"></script>
+<script src="/js/app.js?v=5"></script>
 <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(() => {});

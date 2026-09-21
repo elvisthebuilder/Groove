@@ -326,86 +326,136 @@ app.use(express.static("public"));
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, path: "/terminal" });
 
+// Global map to persist terminal sessions across browser refreshes
+const ptySessions = new Map();
+
 wss.on("connection", (ws, req) => {
   const params = new URL(req.url, "http://localhost").searchParams;
   const repoPath = params.get("repoPath") || os.homedir();
   const cwd = fs.existsSync(repoPath) ? repoPath : os.homedir();
+  const sessionId = params.get("sessionId");
 
-  // Pick a shell — check candidates in order
-  const shellCandidates = [
-    process.env.SHELL,
-    "/bin/zsh",
-    "/bin/bash",
-    "/bin/sh",
-  ].filter(Boolean);
-
-  const shell = shellCandidates.find(s => {
-    try { return fs.existsSync(s) && fs.statSync(s).isFile(); } catch { return false; }
-  }) || "/bin/sh";
-
-  console.log(`[term] shell=${shell} cwd=${cwd}`);
-
-  let ptyProcess;
-  try {
-    ptyProcess = pty.spawn(shell, [], {
-      name: "xterm-256color",
-      cols: 100,
-      rows: 30,
-      cwd,
-      env: { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor" },
-    });
-  } catch (err) {
-    console.error("[term] spawn failed:", err.message);
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(`\r\n\x1b[31mFailed to start terminal: ${err.message}\x1b[0m\r\n`);
-      ws.close();
-    }
+  if (!sessionId) {
+    ws.close();
     return;
   }
 
-  ptyProcess.onData(data => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(data);
-  });
+  let session = ptySessions.get(sessionId);
 
-  // Check if shell has any child processes running (foreground jobs like node, npm, python, etc.)
-  let lastHasChildren = null;
-  const childCheckInterval = setInterval(() => {
-    if (ws.readyState !== WebSocket.OPEN) return;
+  if (!session) {
+    // Pick a shell — check candidates in order
+    const shellCandidates = [
+      process.env.SHELL,
+      "/bin/zsh",
+      "/bin/bash",
+      "/bin/sh",
+    ].filter(Boolean);
+
+    const shell = shellCandidates.find(s => {
+      try { return fs.existsSync(s) && fs.statSync(s).isFile(); } catch { return false; }
+    }) || "/bin/sh";
+
+    console.log(`[term] new session ${sessionId} shell=${shell} cwd=${cwd}`);
+
+    let ptyProcess;
     try {
-      // pgrep -P returns children of the given PID. If output exists, we have children.
-      const stdout = require('child_process').execSync(`pgrep -P ${ptyProcess.pid}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-      const hasChildren = stdout.length > 0;
-      if (hasChildren !== lastHasChildren) {
-        lastHasChildren = hasChildren;
-        ws.send(`GROOVE_CTRL_MSG:{"type":"processStatus","hasChildren":${hasChildren}}`);
+      ptyProcess = pty.spawn(shell, [], {
+        name: "xterm-256color",
+        cols: 100,
+        rows: 30,
+        cwd,
+        env: { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor" },
+      });
+    } catch (err) {
+      console.error("[term] spawn failed:", err.message);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(`\r\n\x1b[31mFailed to start terminal: ${err.message}\x1b[0m\r\n`);
+        ws.close();
       }
-    } catch (e) {
-      // pgrep exits with code 1 if no matches found
-      if (lastHasChildren !== false) {
-        lastHasChildren = false;
-        ws.send(`GROOVE_CTRL_MSG:{"type":"processStatus","hasChildren":false}`);
-      }
+      return;
     }
-  }, 1000);
 
-  ptyProcess.onExit(() => {
-    clearInterval(childCheckInterval);
-    if (ws.readyState === WebSocket.OPEN) ws.close();
-  });
+    session = {
+      pty: ptyProcess,
+      log: [], // Store recent output to replay on refresh
+      ws: null,
+      lastHasChildren: null,
+      interval: null
+    };
+    ptySessions.set(sessionId, session);
+
+    ptyProcess.onData(data => {
+      // Keep only last ~200 chunks to prevent memory bloat, but enough to restore screen
+      session.log.push(data);
+      if (session.log.length > 200) session.log.shift();
+      
+      if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+        session.ws.send(data);
+      }
+    });
+
+    session.interval = setInterval(() => {
+      try {
+        const stdout = require('child_process').execSync(`pgrep -P ${ptyProcess.pid}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+        const hasChildren = stdout.length > 0;
+        if (hasChildren !== session.lastHasChildren) {
+          session.lastHasChildren = hasChildren;
+          if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+            session.ws.send(`GROOVE_CTRL_MSG:{"type":"processStatus","hasChildren":${hasChildren}}`);
+          }
+        }
+      } catch (e) {
+        if (session.lastHasChildren !== false) {
+          session.lastHasChildren = false;
+          if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+            session.ws.send(`GROOVE_CTRL_MSG:{"type":"processStatus","hasChildren":false}`);
+          }
+        }
+      }
+    }, 1000);
+
+    ptyProcess.onExit(() => {
+      clearInterval(session.interval);
+      ptySessions.delete(sessionId);
+      if (session.ws && session.ws.readyState === WebSocket.OPEN) session.ws.close();
+    });
+  } else {
+    console.log(`[term] reconnected session ${sessionId}`);
+  }
+
+  // Bind the current websocket to the session
+  session.ws = ws;
+
+  // Replay history to restore screen
+  if (session.log.length > 0) {
+    ws.send(session.log.join(''));
+  }
+  
+  // Send current process status
+  if (session.lastHasChildren !== null) {
+    ws.send(`GROOVE_CTRL_MSG:{"type":"processStatus","hasChildren":${session.lastHasChildren}}`);
+  }
 
   ws.on("message", msg => {
     try {
       const d = JSON.parse(msg);
-      if (d.type === "input")  ptyProcess.write(d.data);
-      if (d.type === "resize") ptyProcess.resize(d.cols, d.rows);
+      if (d.type === "input")  session.pty.write(d.data);
+      if (d.type === "resize") session.pty.resize(d.cols, d.rows);
+      if (d.type === "close") {
+        clearInterval(session.interval);
+        try { session.pty.kill(); } catch {}
+        ptySessions.delete(sessionId);
+      }
     } catch {
-      ptyProcess.write(msg);
+      session.pty.write(msg);
     }
   });
 
   ws.on("close", () => {
-    clearInterval(childCheckInterval);
-    try { ptyProcess.kill(); } catch {}
+    // Only detach the ws, don't kill the PTY so it survives refresh
+    if (session.ws === ws) {
+      session.ws = null;
+    }
   });
 });
 
